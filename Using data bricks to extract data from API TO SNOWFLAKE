@@ -1,0 +1,81 @@
+# Using data bricks to extract data from API TO SNOWFLAKE
+import requests
+import pandas as pd
+from pyspark.sql import SparkSession
+
+response = requests.get("https://v6.exchangerate-api.com/v6/ed8b73216b3ab95c0969ef92/latest/USD")
+data = response.json()
+
+df = pd.DataFrame(data)
+df2=pd.json_normalize(data)#used to get nested values that you cant get normal when just turn it into a df 
+spark = SparkSession.builder.getOrCreate()
+df = spark.createDataFrame(df2)
+
+                                    #IF EXIST 
+
+# Read existing data from the CSV file into a DataFrame
+existing_df = spark.read.csv("dbfs:/FileStore/DBFS_FILE_FOLDER/single_csv_output.csv", header=True)
+
+# Define your new data as a DataFrame (replace with your actual DataFrame)
+#new_data = spark.createDataFrame([(1, 'value1'), (2, 'value2')], ["id", "value"])
+
+# Filter new_data to remove records that already exist in the existing DataFrame
+filtered_new_data = df.join(existing_df, df.time_last_update_unix == existing_df.time_last_update_unix, "leftanti")
+# Append the filtered new data to the existing DataFrame
+combined_df = existing_df.union(filtered_new_data)
+
+# Write the combined DataFrame back to the CSV file
+combined_df.write.csv("existing_data.csv", mode="overwrite", header=True)
+
+
+
+
+
+# Define temporary DBFS path for the CSV output
+temp_path = "dbfs:/FileStore/DBFS_FILE_FOLDER/temp_output"
+
+# Define final DBFS path for the single CSV file
+final_path = "dbfs:/FileStore/DBFS_FILE_FOLDER/single_csv_output"
+
+# Create the directory in DBFS (if necessary)
+dbutils.fs.mkdirs("dbfs:/FileStore/DBFS_FILE_FOLDER")
+
+# Coalesce to a single partition and write the DataFrame to a temporary CSV directory
+#df.coalesce(1).write.mode("overwrite").csv(temp_path, header=True) --IF I WANT TO TRUNCATE AND RELOAD THE FILE 
+combined_df.coalesce(1).write.mode("append").csv(temp_path, header=True)# IF I WANT TO ADD TO THE SINGLE CSV FILE 
+# List the files in the temporary directory
+files = dbutils.fs.ls(temp_path)
+
+# Filter out the part file
+part_file = [file for file in files if file.name.startswith("part-") and file.name.endswith(".csv")]
+
+if part_file:
+    # Get the name of the part file
+    part_file_name = part_file[0].path
+    # Move and rename the part file to the final path
+    dbutils.fs.mv(part_file_name, final_path + ".csv")
+
+    # Remove the temporary directory
+    dbutils.fs.rm(temp_path, recurse=True)
+
+    print("DataFrame successfully saved to DBFS as a single CSV file")
+else:
+    print("Error: Part file not found in the temporary directory")
+
+# THIS IS HOW YOU LOAD DATA TO SNOWFLAKE 
+df = spark.read.format("csv").option("header", "true").load("dbfs:/FileStore/DBFS_FILE_FOLDER/single_csv_output.csv")
+df.write \
+    .format("snowflake") \
+    .option("sfURL", "https://dsa39159.east-us-2.azure.snowflakecomputing.com/") \
+    .option("sfDatabase", "STAGING_DB") \
+    .option("sfWarehouse", "STAGING_WAREHOUSE") \
+    .option("sfSchema", "CSV") \
+    .option("sfRole", "SYSADMIN") \
+    .option("sfUser", "RASHEEDWALCOTT25") \
+    .option("sfPassword", "Rasheed1998#") \
+    .option("dbtable", "FXRATES") \
+    .mode("overwrite") \
+    .save()
+
+
+
