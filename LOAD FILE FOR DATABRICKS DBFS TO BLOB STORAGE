@@ -1,0 +1,16 @@
+from azure.storage.blob import BlobServiceClient
+
+storage_account_name = "storage_account_name"
+storage_account_key = "storage_account_key" 
+connection_string = "connection_string"
+container_name = "fraudtransactioncsv"
+
+def UploadToBlobStorage(file_path, file_name):  
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=file_name)
+
+    with open(file_path, "rb") as data:
+        blob_client.upload_blob(data)
+        print("uploaded " + file_name + " File")
+
+UploadToBlobStorage('/dbfs/FileStore/FRAUD TRANSACTION/TRANSACTION_1.csv', 'TRANSACTION_1')
