@@ -1,0 +1,43 @@
+from azure.storage.blob import BlobServiceClient
+import os
+
+storage_account_name = storage_account_name
+storage_account_key = storage_account_key
+connection_string =connection_string
+container_name = "fraudtransactioncsv"
+
+def blob_exists(blob_service_client, container_name, blob_name):
+    # Create a blob client using the container and file name
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+    try:
+        blob_client.get_blob_properties()
+        return True
+    except:
+        return False
+
+def UploadToBlobStorage(file_path, file_name):  
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    if not blob_exists(blob_service_client, container_name, file_name):
+        try:
+            blob_client = blob_service_client.get_blob_client(container=container_name, blob=file_name)
+ # Open the file and upload it to the blob
+            with open(file_path, "rb") as data:
+                blob_client.upload_blob(data, overwrite=False)
+                print(f"Uploaded {file_name} successfully.")
+                
+        except Exception as ex:
+            print(f"Exception: {ex}")
+    else:
+        print(f"Blob {file_name} already exists. Skipping upload.")
+        
+def upload_folder_to_blob_storage(folder_path):
+    # List all files in the directory
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        # Ensure it's a file and not a subdirectory
+        if os.path.isfile(file_path):
+            UploadToBlobStorage(file_path, file_name)
+
+# Example usage
+folder_path = '/dbfs/FileStore/FRAUD TRANSACTION/'
+upload_folder_to_blob_storage(folder_path)
