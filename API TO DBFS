@@ -1,0 +1,86 @@
+import requests
+import pandas as pd
+import json
+from pyspark.sql import SparkSession
+from azure.storage.blob import BlobServiceClient
+import os
+
+
+
+
+url = "https://indeed12.p.rapidapi.com/jobs/search"
+
+querystring = {"query":"[data scientist,data engineer,data analyst]","location":"[new york]","page_id":"1","locality":"us","fromage":"1","radius":"50","sort":"date"}
+
+headers = {
+	"x-rapidapi-key": "e690fadb26msh3c1237f0ba04197p1632a5jsn45f06e4abeba",
+	"x-rapidapi-host": "indeed12.p.rapidapi.com"
+}
+
+response = requests.get(url, headers=headers, params=querystring)
+
+data = response.json()
+
+df = pd.DataFrame(data)
+df2=pd.json_normalize(data['hits'])#used to get nested values that you cant get normal when just turn it into a df 
+spark = SparkSession.builder.getOrCreate()
+df = spark.createDataFrame(df2)
+
+# Define temporary DBFS path for the CSV output
+temp_path = "dbfs:/FileStore/DBFS_FILE_FOLDER/temp_output"
+
+# Define final DBFS path for the single CSV file
+final_path = "dbfs:/FileStore/DBFS_FILE_FOLDER/JOBOPENINGS_csv_output"
+
+# Create the directory in DBFS (if necessary)
+dbutils.fs.mkdirs("dbfs:/FileStore/DBFS_FILE_FOLDER")
+
+# Coalesce to a single partition and write the DataFrame to a temporary CSV directory
+#df.coalesce(1).write.mode("overwrite").csv(temp_path, header=True) --IF I WANT TO TRUNCATE AND RELOAD THE FILE 
+df.coalesce(1).write.mode("append").csv(temp_path, header=True)# IF I WANT TO ADD TO THE SINGLE CSV FILE 
+# List the files in the temporary directory
+files = dbutils.fs.ls(temp_path)
+
+# Filter out the part file
+part_file = [file for file in files if file.name.startswith("part-") and file.name.endswith(".csv")]
+
+if part_file:
+    # Get the name of the part file
+    part_file_name = part_file[0].path
+    # Move and rename the part file to the final path
+    dbutils.fs.mv(part_file_name, final_path + ".csv")
+
+    # Remove the temporary directory
+    dbutils.fs.rm(temp_path, recurse=True)
+
+    print("DataFrame successfully saved to DBFS as a single CSV file")
+else:
+    print("Error: Part file not found in the temporary directory")
+
+
+
+
+storage_account_name = "storage_account_name"
+storage_account_key = storage_account_key
+connection_string = connection_string
+container_name = "jobsearch"
+
+def UploadToBlobStorage(file_path, file_name):  
+    blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+    blob_client = blob_service_client.get_blob_client(container=container_name, blob=file_name)
+
+    with open(file_path, "rb") as data:
+        blob_client.upload_blob(data)
+        print("uploaded " + file_name + " File")
+
+def upload_folder_to_blob_storage(folder_path):
+    # List all files in the directory
+    for file_name in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, file_name)
+        # Ensure it's a file and not a subdirectory
+        if os.path.isfile(file_path):
+            UploadToBlobStorage(file_path, file_name)
+
+# Example usage
+folder_path = '/dbfs/FileStore/DBFS_FILE_FOLDER/'
+upload_folder_to_blob_storage(folder_path)
