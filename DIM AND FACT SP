@@ -1,0 +1,250 @@
+CREATE PROCEDURE dbo.StoredProcedureName
+AS
+BEGIN
+    MERGE INTO Sales.DimCustomer AS t
+    USING 
+    (
+        SELECT 
+            c.[CustomerID],
+            c.[NameStyle],
+            c.[Title],
+            c.[FirstName],
+            c.[MiddleName],
+            c.[LastName],
+            c.[Suffix],
+            c.[CompanyName],
+            c.[SalesPerson],
+            c.[EmailAddress],
+            c.[Phone],
+            ca.[AddressID],
+            ca.[AddressType],
+            a.[AddressLine1],
+            a.[AddressLine2],
+            a.[City],
+            a.[StateProvince],
+            a.[CountryRegion],
+            a.[PostalCode],
+            [validto]=cast(getdate() as date),
+            [Vaildfrom]= '9999-12-31'
+            
+        FROM SalesLt.Customer AS c
+        INNER JOIN SalesLt.CustomerAddress AS ca ON c.CustomerID = ca.CustomerID
+        INNER JOIN SalesLT.Address AS a ON ca.AddressID = a.AddressID
+    ) AS s
+    ON t.CustomerID = s.CustomerID
+    WHEN MATCHED THEN 
+        UPDATE SET 
+            t.[AddressType] = s.[AddressType],
+            t.[AddressLine1] = s.[AddressLine1],
+            t.[AddressLine2] = s.[AddressLine2],
+            t.[City] = s.[City],
+            t.[StateProvince] = s.[StateProvince],
+            t.[CountryRegion] = s.[CountryRegion],
+            t.[PostalCode] = s.[PostalCode]
+    WHEN NOT MATCHED BY TARGET THEN 
+        INSERT 
+        (
+            [CustomerID],
+            [NameStyle],
+            [Title],
+            [FirstName],
+            [MiddleName],
+            [LastName],
+            [Suffix],
+            [CompanyName],
+            [SalesPerson],
+            [EmailAddress],
+            [Phone],
+            [AddressID],
+            [AddressType],
+            [AddressLine1],
+            [AddressLine2],
+            [City],
+            [StateProvince],
+            [CountryRegion],
+            [PostalCode],
+            [validto],
+            [Validfrom]
+        ) 
+        VALUES 
+        (
+            s.[CustomerID],
+            s.[NameStyle],
+            s.[Title],
+            s.[FirstName],
+            s.[MiddleName],
+            s.[LastName],
+            s.[Suffix],
+            s.[CompanyName],
+            s.[SalesPerson],
+            s.[EmailAddress],
+            s.[Phone],
+            s.[AddressID],
+            s.[AddressType],
+            s.[AddressLine1],
+            s.[AddressLine2],
+            s.[City],
+            s.[StateProvince],
+            s.[CountryRegion],
+            s.[PostalCode],
+            cast(getdate() as date),
+            '9999-12-31'
+        );
+END
+GO
+
+-- Example to execute the stored procedure:
+EXECUTE dbo.StoredProcedureName;
+GO
+
+
+
+-------------------------------------------------------------------
+
+CREATE PROCEDURE dbo.SpDimproductdetials
+AS
+BEGIN
+    MERGE INTO Sales.Dimproductdetails AS t
+    USING 
+    (
+        select 
+        p.[ProductID]
+        ,p.[Name]
+        ,p.[ProductNumber]
+        ,p.[Color]
+        ,p.[StandardCost]
+        ,p.[ListPrice]
+        ,p.[Size]
+        ,p.[Weight]
+        ,p.[SellStartDate]
+        ,p.[SellEndDate]
+        ,p.[DiscontinuedDate]
+        ,p.[ProductCategoryID]
+        ,pc.[ParentProductCategoryID]
+        ,pc.[Name] as ProductCategoryName
+        ,pd.[ProductDescriptionID]
+        ,pd.[Description]
+        ,pm.[ProductModelID]
+        ,pm.[Name] as ProductModelName
+        ,pm.[CatalogDescription]
+        ,pmpd.[Culture]
+        ,[validto]=cast(getdate() as date)
+        ,[Vaildfrom]= '9999-12-31'
+        from SalesLT.product P
+        inner join SalesLT.ProductCategory pc on p.productcategoryid = pc.productcategoryid
+        inner join   SalesLT.[ProductModelProductDescription] pmpd on pmpd.ProductModelID = p.ProductModelID
+        inner join SalesLT.[ProductDescription] as PD on  pd.ProductDescriptionID=pmpd.ProductDescriptionID
+        inner join SalesLT.productModel pm on pmpd.ProductModelID = pm.ProductModelID  
+    ) AS s
+    ON t.ProductID = s.ProductID
+    WHEN MATCHED THEN 
+        UPDATE SET 
+        t.[ProductID]=s.ProductID
+        ,t.[Name]=s.Name
+        ,t.[ProductNumber]=s.ProductNumber
+        ,t.[Color]=s.Color
+        ,t.[StandardCost]=s.StandardCost
+        ,t.[ListPrice]=s.ListPrice
+        ,t.[Size]=s.Size
+        ,t.[Weight]=s.Weight
+        ,t.[ProductCategoryID]=s.ProductCategoryID
+        ,t.[SellStartDate]=s.SellStartDate
+        ,t.[SellEndDate]=s.SellEndDate
+        ,t.[DiscontinuedDate]=s.DiscontinuedDate
+        ,t.[ParentProductCategoryID]=s.ParentProductCategoryID
+        ,t.[ProductCategoryName]=s.Name
+        ,t.[ProductDescriptionID]=s.ProductDescriptionID
+        ,t.[Description]=s.Description
+        ,t.[ProductModelID]=s.ProductModelID
+        ,t.[ProductModelName]=s.Name
+        ,t.[CatalogDescription]=s.CatalogDescription
+        ,t.[Culture]=s.Culture
+    WHEN NOT MATCHED BY TARGET THEN 
+        INSERT 
+        (
+         [ProductID]
+        ,[Name]
+        ,[ProductNumber]
+        ,[Color]
+        ,[StandardCost]
+        ,[ListPrice]
+        ,[Size]
+        ,[Weight]
+        ,[ProductCategoryID]
+        ,[SellStartDate]
+        ,[SellEndDate]
+        ,[DiscontinuedDate]
+        ,[ParentProductCategoryID]
+        ,[ProductCategoryName]
+        ,[ProductDescriptionID]
+        ,[Description]
+        ,[ProductModelID]
+        ,[ProductModelName]
+        ,[CatalogDescription]
+        ,[Culture]
+        ,[validto]
+        ,[Vaildfrom]
+        ) 
+        VALUES 
+        (
+         s.[ProductID]
+        ,s.[Name]
+        ,s.[ProductNumber]
+        ,s.[Color]
+        ,s.[StandardCost]
+        ,s.[ListPrice]
+        ,s.[Size]
+        ,s.[Weight]
+        ,s.[ProductCategoryID]
+        ,s.[SellStartDate]
+        ,s.[SellEndDate]
+        ,s.[DiscontinuedDate]
+        ,s.[ParentProductCategoryID]
+        ,s.[ProductCategoryName]
+        ,s.[ProductDescriptionID]
+        ,s.[Description]
+        ,s.[ProductModelID]
+        ,s.[ProductModelName]
+        ,s.[CatalogDescription]
+        ,s.[Culture]
+        ,cast(getdate() as date)
+        ,'9999-12-31'
+        );
+END
+GO
+
+-- Example to execute the stored procedure:
+EXECUTE dbo.SpDimproductdetials;
+GO
+---------------------------------------------------------
+insert into factsales
+select 
+sod.[SalesOrderID]
+,[SalesOrderDetailID]
+,[OrderQty]
+,[ProductID]
+,[UnitPrice]
+,[UnitPriceDiscount]
+,[LineTotal]
+,sod.[ModifiedDate]
+,[RevisionNumber]
+,[OrderDate]
+,[DueDate]
+,[ShipDate]
+,[Status]
+,[OnlineOrderFlag]
+,[SalesOrderNumber]
+,[PurchaseOrderNumber]
+,[AccountNumber]
+,[CustomerID]
+,[ShipToAddressID]
+,[BillToAddressID]
+,[ShipMethod]
+,[CreditCardApprovalCode]
+,[SubTotal]
+,[TaxAmt]
+,[Freight]
+,[TotalDue]
+,[Comment]
+ from SalesOrderDetail sod
+inner join  SalesOrderHeader soh on soh.salesorderid =sod.salesorderid
