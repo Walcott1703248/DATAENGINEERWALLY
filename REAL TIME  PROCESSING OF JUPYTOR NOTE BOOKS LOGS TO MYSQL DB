@@ -1,0 +1,189 @@
+# -----------------------------------------------------
+# Script to:
+# 1. Start Jupyter Notebook with logs redirected to a file
+# 2. Stream new log lines from that file
+# 3. Send each line to a Kafka topic
+# 4. Also store each line in a MySQL database
+# -----------------------------------------------------
+
+import subprocess         # To run the Jupyter server from Python
+import time               # For sleeping while waiting on log activity
+import os                 # For path expansion (e.g., ~ -> full path)
+import pymysql            # MySQL client library
+from kafka import KafkaProducer, KafkaConsumer  #used to setting up a producer and consumer
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col
+import threading
+
+# Define the root directory where Kafka is installed
+# Make sure to replace this with the actual path on your Mac
+# Example: "/Users/yourname/kafka_2.13-3.6.0"
+# Paths
+KAFKA_HOME = "/Users/rasheedwalcott/Downloads/kafka" # Update this to your Kafka root directory
+
+# Commands
+zookeeper_cmd = f"{KAFKA_HOME}/bin/zookeeper-server-start.sh {KAFKA_HOME}/config/zookeeper.properties"
+broker_cmds = [
+    f"{KAFKA_HOME}/bin/kafka-server-start.sh {KAFKA_HOME}/config/server0.properties",
+    f"{KAFKA_HOME}/bin/kafka-server-start.sh {KAFKA_HOME}/config/server1.properties",
+    f"{KAFKA_HOME}/bin/kafka-server-start.sh {KAFKA_HOME}/config/server2.properties",
+]
+
+# Start Zookeeper
+print("Starting Zookeeper...")
+zookeeper_process = subprocess.Popen(zookeeper_cmd, shell=True)
+
+# Wait a bit for Zookeeper to initialize
+time.sleep(5)
+
+# Start Kafka brokers
+broker_processes = []
+for i, cmd in enumerate(broker_cmds):
+    print(f"Starting Kafka Broker {i}...")
+    proc = subprocess.Popen(cmd, shell=True)
+    broker_processes.append(proc)
+    time.sleep(2)  # slight delay between brokers
+
+print("All processes started. Zookeeper and Kafka brokers are now running.")
+
+# -----------------------------------
+# Construct the Kafka topic creation
+# -----------------------------------
+
+# Construct the Kafka topic creation command using multi-line formatting
+# This command creates a topic named 'months' with:
+# - replication factor of 3 (meaning each partition is replicated across 3 brokers)
+# - 7 partitions (for parallelism and scalability)
+# - connects to the 3 local Kafka brokers on ports 9092, 9093, and 9094
+create_topic_cmd = f"""{KAFKA_HOME}/bin/kafka-topics.sh \
+--bootstrap-server localhost:9092,localhost:9093,localhost:9094 \
+--create \
+--replication-factor 3 \
+--partitions 12 \
+--topic jupyter-logs"""
+
+# Run the command using subprocess
+# shell=True allows us to run the command exactly as we would in the terminal
+# check=True tells Python to raise an exception if the command fails
+try:
+    subprocess.run(create_topic_cmd, shell=True, check=True)
+    print("Topic jupyter-logs created successfully.")
+except subprocess.CalledProcessError as e:
+    # This will catch any error thrown by Kafka (e.g., topic already exists, broker not available)
+    print("Error creating topic:")
+    print(e)
+
+
+
+
+
+# -----------------------------------
+# 1. Define Log File, Kafka, and MySQL Configurations
+# -----------------------------------
+
+log_path = os.path.expanduser('~/Documents/jupyter_logs.txt')
+
+# Kafka producer setup
+producer = KafkaProducer(
+    bootstrap_servers=['localhost:9092', 'localhost:9093', 'localhost:9094']
+)
+topic = 'jupyter-logs'
+
+# MySQL config
+mysql_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '########',
+    'database': 'health_logs_db'
+}
+
+# -----------------------------------
+# 2. Start Jupyter Notebook and Log Output
+# -----------------------------------
+
+print("Starting Jupyter Notebook and logging to:", log_path)
+jupyter_cmd = f"jupyter notebook > {log_path} 2>&1"
+jupyter_process = subprocess.Popen(jupyter_cmd, shell=True)
+time.sleep(5)  # Give Jupyter time to start
+
+# -----------------------------------
+# 3. Connect to MySQL and Create Logs Table
+# -----------------------------------
+
+conn = pymysql.connect(**mysql_config)
+cursor = conn.cursor()
+
+cursor.execute("""
+    CREATE TABLE IF NOT EXISTS jupyter_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        log_line TEXT,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
+conn.commit()
+
+# -----------------------------------
+# 4. Follow Log File (like tail -f)
+# -----------------------------------
+
+def follow_log_file(file_path):
+    with open(file_path, 'r') as f:
+        f.seek(0, os.SEEK_END)  # Go to end of file
+        while True:
+            line = f.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            yield line
+
+# -----------------------------------
+# 5. Kafka Consumer Thread to Store Logs in MySQL
+# -----------------------------------
+
+def consume_and_store_logs():
+    print("Kafka Consumer started...")
+    consumer = KafkaConsumer(
+        topic,
+        bootstrap_servers=['localhost:9092', 'localhost:9093', 'localhost:9094'],
+        auto_offset_reset='latest',
+        enable_auto_commit=True,
+        group_id='log-consumers',
+        value_deserializer=lambda x: x.decode('utf-8')
+    )
+
+    for message in consumer:
+        log = message.value
+        print(f"Received from Kafka: {log}")
+        cursor.execute("INSERT INTO jupyter_logs (log_line) VALUES (%s)", (log,))
+        conn.commit()
+
+# -----------------------------------
+# 6. Stream Logs to Kafka in Real-Time
+# -----------------------------------
+
+def produce_logs():
+    for log_line in follow_log_file(log_path):
+        clean_line = log_line.strip()
+        if clean_line:
+            print(f"Sending to Kafka: {clean_line}")
+            producer.send(topic, clean_line.encode('utf-8'))
+
+# -----------------------------------
+# 7. Start Producer and Consumer Together
+# -----------------------------------
+
+print(f"Streaming logs from '{log_path}' to Kafka and MySQL...")
+
+try:
+    # Start consumer in background
+    threading.Thread(target=consume_and_store_logs, daemon=True).start()
+
+    # Start producer (main thread)
+    produce_logs()
+
+except KeyboardInterrupt:
+    print("Stopping log stream and Jupyter Notebook...")
+    jupyter_process.terminate()
+    jupyter_process.wait()
+    cursor.close()
+    conn.close()
